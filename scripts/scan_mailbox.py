@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.lib.accounts import resolve_accounts  # noqa: E402
 from scripts.lib.classify import classify_record  # noqa: E402
 from scripts.lib.gmail import (  # noqa: E402
     META_FIELDS,
@@ -23,13 +24,12 @@ from scripts.lib.gmail import (  # noqa: E402
     chunks,
     describe,
     envelope_record,
-    load_credentials,
     search_year,
     uid_map,
     years_to_scan,
 )
-from scripts.lib.paths import INDEX_PATH, REPO_ROOT, STATS_PATH  # noqa: E402
-from scripts.lib.stats import aggregate, format_report, write_stats  # noqa: E402
+from scripts.lib.paths import REPO_ROOT, index_path, stats_path  # noqa: E402
+from scripts.lib.stats import aggregate, format_report, load_index, write_stats  # noqa: E402
 
 
 def _utf8_stdio() -> None:
@@ -179,6 +179,11 @@ def main() -> int:
         default=5,
         help="Print N sample rows per topic after the scan (default: 5)",
     )
+    parser.add_argument(
+        "--mailbox",
+        default=None,
+        help="Mailbox slug, email, or 'all' (default: all configured)",
+    )
     args = parser.parse_args()
 
     if args.limit < 0:
@@ -186,7 +191,7 @@ def main() -> int:
         return 1
 
     try:
-        address, password = load_credentials()
+        accounts = resolve_accounts(args.mailbox)
         years = years_to_scan(args.since_year, args.until_year)
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -202,73 +207,75 @@ def main() -> int:
         return 1
 
     try:
-        with GmailSession(address, password) as gmail:
-            print(f"Connected as {address}")
-            print(f"Folder: {gmail.folder} ({gmail.exists} messages, read-only)")
-            if args.check:
-                return 0
-
-            known: set[str] = set() if args.fresh else _load_known_msgids(INDEX_PATH)
-            if known and not args.fresh:
-                print(f"Already indexed: {len(known)}")
-
-            all_new: list[dict] = []
-            remaining = args.limit
-            for year in reversed(years):
-                if args.limit and remaining <= 0:
-                    break
-                print(f"Searching {year}…")
-                try:
-                    uids, split = search_year(gmail, year)
-                except LoginError:
-                    raise
-                except Exception as exc:
-                    print(f"  search failed: {exc}", file=sys.stderr)
+        for account in accounts:
+            idx = index_path(account.slug)
+            st = stats_path(account.slug)
+            with GmailSession(account.address, account.password) as gmail:
+                print(f"Connected as {account.address} ({account.slug})")
+                print(f"Folder: {gmail.folder} ({gmail.exists} messages, read-only)")
+                if args.check:
                     continue
-                note = " (split by month)" if split else ""
-                print(f"  {len(uids)} messages{note}")
-                year_limit = remaining if args.limit else 0
-                records, skipped, errors = _fetch_classified(
-                    gmail, uids, known, limit=year_limit
-                )
-                print(
-                    f"  new={len(records)} skipped_known={skipped} errors={errors}"
-                )
-                all_new.extend(records)
-                if args.limit:
-                    remaining = max(0, args.limit - len(all_new))
 
-            print(f"Classified this run: {len(all_new)}")
-            if not all_new and not known:
-                print("No messages found.")
-                return 0
+                known: set[str] = set() if args.fresh else _load_known_msgids(idx)
+                if known and not args.fresh:
+                    print(f"Already indexed: {len(known)}")
 
-            if args.dry_run:
-                # Stats for this run only (or merge with known if we want — keep run-only).
-                stats = aggregate(all_new)
+                all_new: list[dict] = []
+                remaining = args.limit
+                for year in reversed(years):
+                    if args.limit and remaining <= 0:
+                        break
+                    print(f"Searching {year}…")
+                    try:
+                        uids, split = search_year(gmail, year)
+                    except LoginError:
+                        raise
+                    except Exception as exc:
+                        print(f"  search failed: {exc}", file=sys.stderr)
+                        continue
+                    note = " (split by month)" if split else ""
+                    print(f"  {len(uids)} messages{note}")
+                    year_limit = remaining if args.limit else 0
+                    records, skipped, errors = _fetch_classified(
+                        gmail, uids, known, limit=year_limit
+                    )
+                    for row in records:
+                        row["mailbox"] = account.slug
+                    print(
+                        f"  new={len(records)} skipped_known={skipped} errors={errors}"
+                    )
+                    all_new.extend(records)
+                    if args.limit:
+                        remaining = max(0, args.limit - len(all_new))
+
+                print(f"Classified this run: {len(all_new)}")
+                if not all_new and not known:
+                    print("No messages found.")
+                    continue
+
+                if args.dry_run:
+                    stats = aggregate(all_new)
+                    print(format_report(stats))
+                    _print_samples(all_new, args.sample)
+                    print("Dry run: nothing written.")
+                    continue
+
+                if args.fresh:
+                    _rewrite_index(idx, all_new)
+                    indexed = all_new
+                else:
+                    _append_index(idx, all_new)
+                    indexed = load_index(idx)
+
+                stats = aggregate(indexed)
+                write_stats(stats, st)
                 print(format_report(stats))
-                _print_samples(all_new, args.sample)
-                print("Dry run: nothing written.")
-                return 0
-
-            if args.fresh:
-                _rewrite_index(INDEX_PATH, all_new)
-                indexed = all_new
-            else:
-                _append_index(INDEX_PATH, all_new)
-                from scripts.lib.stats import load_index
-
-                indexed = load_index(INDEX_PATH)
-
-            stats = aggregate(indexed)
-            write_stats(stats, STATS_PATH)
-            print(format_report(stats))
-            _print_samples(all_new or indexed, args.sample)
-            print(
-                f"Wrote {INDEX_PATH.relative_to(REPO_ROOT)} "
-                f"and {STATS_PATH.relative_to(REPO_ROOT)}"
-            )
-            return 0
+                _print_samples(all_new or indexed, args.sample)
+                print(
+                    f"Wrote {idx.relative_to(REPO_ROOT)} "
+                    f"and {st.relative_to(REPO_ROOT)}"
+                )
+        return 0
     except LoginError:
         print(
             "error: Gmail rejected the login. Use an app password (Google Account → "

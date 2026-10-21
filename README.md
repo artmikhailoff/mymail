@@ -1,27 +1,34 @@
 # mymail
 
-Personal Gmail census: scan the mailbox read-only over IMAP, classify messages
-into topics (noise, health, construction, finance, …), and report counts.
+Personal Gmail census and archive: classify mail into topics, download signal
+buckets for agent Q&A, unsubscribe from ads, and trash marketing noise.
 
 ## Layout
 
 ```
 mymail/
+  credentials/                 # Optional extra *.env mailboxes (gitignored)
   data/
-    index.jsonl   # One header record per scanned message (gitignored)
-    stats.json    # Aggregated counts (gitignored)
+    mailboxes/<slug>/
+      mailbox.json
+      index.jsonl              # Header census + topic
+      stats.json
+      unsubscribe_log.jsonl
+      delete_log.jsonl
+    raw/<slug>/<topic>/<year>/ # Full .eml + .meta.json (signal topics only)
+    processed/<slug>/<topic>/<year>/  # Plain text for agents
+    bundles/<slug>/<topic>.md  # Optional @-mention packs
   scripts/
-    scan_mailbox.py   # IMAP scan → classify → write index + stats
-    report.py         # Print stats from data/stats.json (or rebuild from index)
-    reclassify.py     # Re-run topic rules on the index
-    unsubscribe.py    # List-Unsubscribe for noise/ad senders
-    lib/
-      gmail.py        # IMAP session + credentials
-      classify.py     # Topic rules
-      unsubscribe.py  # One-click / mailto / HTTP unsubscribe
-      stats.py        # Aggregation
-      paths.py
+    scan_mailbox.py
+    download_bodies.py
+    extract_text.py
+    build_bundles.py
+    report.py / reclassify.py
+    unsubscribe.py
+    delete_noise.py
 ```
+
+Year is the finest folder grain. **Noise is never downloaded** into `raw/`.
 
 ## Setup
 
@@ -31,83 +38,58 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD (same app password as myhealth is fine)
+# Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD
 ```
+
+More accounts: add `credentials/other.env` with the same keys. Select with
+`--mailbox all`, `--mailbox amik1977_at_gmail_com`, or an email address.
 
 ## Workflow
 
-Check login:
-
 ```powershell
 python scripts/scan_mailbox.py --check
-```
-
-Dry run (search + classify headers, print counts, write nothing):
-
-```powershell
-python scripts/scan_mailbox.py --dry-run --since-year 2024
-```
-
-Full census for the last five calendar years (default):
-
-```powershell
-python scripts/scan_mailbox.py
+python scripts/scan_mailbox.py --since-year 2024
 python scripts/report.py
-```
 
-Limit how many headers are classified this run (newest first within each year):
+# Download bodies for health/construction/finance/… (not noise)
+python scripts/download_bodies.py
+python scripts/extract_text.py
+python scripts/build_bundles.py
 
-```powershell
-python scripts/scan_mailbox.py --limit 500
-```
-
-After editing rules in `scripts/lib/classify.py`, refresh topics without re-downloading:
-
-```powershell
-python scripts/reclassify.py
-```
-
-## Unsubscribe (noise / ads only)
-
-For senders classified as **noise** (promotions, shopping ads, recommendations),
-mymail reads `List-Unsubscribe` / one-click headers and unsubscribes when possible.
-One attempt per sender. The mailbox itself is not modified (no deletes).
-
-Preview what would happen:
-
-```powershell
-python scripts/unsubscribe.py --limit 30
-```
-
-Actually unsubscribe:
-
-```powershell
+# Ads: unsubscribe headers, then move remaining noise to Trash
 python scripts/unsubscribe.py --apply
-python scripts/unsubscribe.py --apply --sender shein.com --sender michaels.com
+python scripts/delete_noise.py --apply
 ```
 
-Results append to `data/unsubscribe_log.jsonl` (gitignored). Already-handled
-senders are skipped unless you pass `--force`.
+Ask an agent with `@data/bundles/<slug>/health.md` or
+`@data/processed/<slug>/construction/2025/`.
 
 ## Topics
 
-| Topic | Meaning |
-|-------|---------|
-| `noise` | Promotions, social, newsletters, ads |
-| `health` | Labs, clinics, insurance, portals |
-| `construction` | Home improvement, contractors, building materials |
-| `finance` | Banks, cards, taxes, payments |
-| `travel` | Flights, hotels, tickets |
-| `school` | Schools, ParentSquare, district mail |
-| `shopping` | Orders, shipping, marketplaces |
-| `accounts` | Security codes, SaaS, account alerts |
-| `personal` | Likely human / personal correspondence |
-| `other` | Everything else |
+| Topic | Meaning | Downloaded? |
+|-------|---------|-------------|
+| `noise` | Promotions, social, ads | No (unsubscribe + trash) |
+| `health` | Labs, clinics, insurance | Yes |
+| `construction` | Home improvement / building | Yes |
+| `finance` | Banks, cards, taxes | Yes |
+| `travel` | Flights, hotels | Yes |
+| `school` | ParentSquare, schools | Yes |
+| `shopping` | Orders / shipping | Yes |
+| `personal` | Human correspondence | Yes |
+| `accounts` | OTP / SaaS | Opt-in (`--include-accounts`) |
+| `other` | Unclassified | Opt-in (`--include-other`) |
 
-Classification uses Gmail categories (Promotions/Social), sender domains, and
-subject patterns. Headers only — the mailbox is never modified.
+## Delete marketing mail
+
+`delete_noise.py` moves **topic=noise** messages to Gmail Trash (recoverable ~30 days).
+Dry-run by default:
+
+```powershell
+python scripts/delete_noise.py --limit 50
+python scripts/delete_noise.py --apply
+python scripts/delete_noise.py --apply --sender shein.com
+```
 
 ## Privacy
 
-`data/*` census outputs and `.env` are **gitignored**. Only scripts and docs
-belong on the remote.
+All of `data/` census/archives and `.env` / `credentials/*.env` are **gitignored**.

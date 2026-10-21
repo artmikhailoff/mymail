@@ -1,8 +1,9 @@
-"""Print mailbox census stats from data/stats.json (or rebuild from index)."""
+"""Print mailbox census stats from mailboxes/<slug>/stats.json."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -10,7 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.lib.paths import INDEX_PATH, STATS_PATH  # noqa: E402
+from scripts.lib.accounts import resolve_accounts  # noqa: E402
+from scripts.lib.paths import index_path, stats_path  # noqa: E402
 from scripts.lib.stats import (  # noqa: E402
     aggregate,
     format_report,
@@ -33,6 +35,7 @@ def _utf8_stdio() -> None:
 def main() -> int:
     _utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mailbox", default=None, help="Slug, email, or all")
     parser.add_argument(
         "--rebuild",
         action="store_true",
@@ -45,27 +48,30 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.rebuild or not STATS_PATH.is_file():
-        records = load_index(INDEX_PATH)
-        if not records:
-            print(
-                f"error: no index at {INDEX_PATH}. Run scripts/scan_mailbox.py first.",
-                file=sys.stderr,
-            )
-            return 1
-        stats = aggregate(records)
-        write_stats(stats, STATS_PATH)
-    else:
-        import json
+    try:
+        accounts = resolve_accounts(args.mailbox)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
-        stats = json.loads(STATS_PATH.read_text(encoding="utf-8"))
+    for account in accounts:
+        idx = index_path(account.slug)
+        st = stats_path(account.slug)
+        print(f"=== {account.address} ({account.slug}) ===")
+        if args.rebuild or not st.is_file():
+            records = load_index(idx)
+            if not records:
+                print(f"error: no index at {idx}. Run scan_mailbox.py first.", file=sys.stderr)
+                continue
+            stats = aggregate(records)
+            write_stats(stats, st)
+        else:
+            stats = json.loads(st.read_text(encoding="utf-8"))
 
-    if args.json:
-        import json
-
-        print(json.dumps(stats, ensure_ascii=False, indent=2))
-    else:
-        print(format_report(stats))
+        if args.json:
+            print(json.dumps(stats, ensure_ascii=False, indent=2))
+        else:
+            print(format_report(stats))
     return 0
 
 

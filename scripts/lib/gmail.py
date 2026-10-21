@@ -31,6 +31,7 @@ META_FIELDS = [
     "RFC822.SIZE",
     "ENVELOPE",
 ]
+BODY_FIELDS = ["BODY.PEEK[]", "X-GM-MSGID"]
 
 # A single Gmail IMAP search can omit matches once the hit list gets very large.
 LARGE_YEAR_HITS = 5000
@@ -219,13 +220,15 @@ def describe(record: dict) -> str:
 
 
 class GmailSession:
-    """One readonly IMAP session. Reconnects after dropped connections."""
+    """IMAP session. Default is readonly; set readonly=False for Trash moves."""
 
-    def __init__(self, address: str, password: str):
+    def __init__(self, address: str, password: str, *, readonly: bool = True):
         self.address = address
         self.password = password
+        self.readonly = readonly
         self.client = None
         self.folder: str | None = None
+        self.trash_folder: str | None = None
         self.exists: int | None = None
 
     def __enter__(self) -> GmailSession:
@@ -243,7 +246,8 @@ class GmailSession:
         try:
             client.login(self.address, self.password)
             folder = _all_mail_folder(client)
-            selected = client.select_folder(folder, readonly=True)
+            selected = client.select_folder(folder, readonly=self.readonly)
+            trash = _flagged_folder(client, "\\Trash")
         except Exception:
             try:
                 client.logout()
@@ -252,6 +256,7 @@ class GmailSession:
             raise
         self.client = client
         self.folder = folder
+        self.trash_folder = trash
         exists = selected.get(b"EXISTS", selected.get("EXISTS"))
         self.exists = int(exists) if exists is not None else None
 
@@ -299,19 +304,43 @@ class GmailSession:
         def run() -> bytes:
             assert self.client is not None
             fetched = dict(self.client.fetch([uid], ["BODY.PEEK[HEADER]"]))
-            item = fetched.get(uid) or fetched.get(str(uid))
-            if not item:
-                # imapclient sometimes keys by int
-                for key, value in fetched.items():
-                    if int(key) == uid:
-                        item = value
-                        break
+            item = _fetch_item(fetched, uid)
             if not item:
                 raise RuntimeError(f"No HEADER fetch for uid {uid}")
             raw = _field(item, "BODY[HEADER]", "BODY.PEEK[HEADER]")
             if isinstance(raw, (bytes, bytearray)) and raw:
                 return bytes(raw)
             raise RuntimeError(f"Empty HEADER for uid {uid}")
+
+        return self._call(run)
+
+    def fetch_body(self, uid: int) -> bytes:
+        """BODY.PEEK[] full RFC822 message without marking read."""
+
+        def run() -> bytes:
+            assert self.client is not None
+            fetched = dict(self.client.fetch([uid], BODY_FIELDS))
+            item = _fetch_item(fetched, uid)
+            if not item:
+                raise RuntimeError(f"No body fetch for uid {uid}")
+            return message_body(item)
+
+        return self._call(run)
+
+    def move_to_trash(self, uids: list[int]) -> int:
+        """Move messages to Gmail Trash (recoverable ~30 days)."""
+        if not uids:
+            return 0
+        if self.readonly:
+            raise RuntimeError("move_to_trash requires GmailSession(readonly=False)")
+        trash = self.trash_folder
+        if not trash:
+            raise RuntimeError("Could not find Gmail Trash folder")
+
+        def run() -> int:
+            assert self.client is not None
+            self.client.move(uids, trash)
+            return len(uids)
 
         return self._call(run)
 
@@ -353,14 +382,38 @@ def _transient(exc: BaseException) -> bool:
 
 
 def _all_mail_folder(client: object) -> str:
+    return _flagged_folder(client, "\\All")
+
+
+def _flagged_folder(client: object, flag: str) -> str:
     for flags, _delim, name in client.list_folders():  # type: ignore[attr-defined]
-        normalized = {_text(flag) for flag in flags}
-        if "\\All" in normalized:
+        normalized = {_text(item) for item in flags}
+        if flag in normalized:
             return _text(name)
     raise RuntimeError(
-        "Could not find the Gmail All Mail folder. Enable IMAP in Gmail "
+        f"Could not find Gmail folder with flag {flag}. Enable IMAP in Gmail "
         "(Settings → See all settings → Forwarding and POP/IMAP)."
     )
+
+
+def _fetch_item(fetched: dict, uid: int) -> dict | None:
+    item = fetched.get(uid)
+    if item:
+        return item
+    for key, value in fetched.items():
+        try:
+            if int(key) == uid:
+                return value
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def message_body(item: dict) -> bytes:
+    value = _field(item, "BODY[]", "BODY.PEEK[]")
+    if isinstance(value, (bytes, bytearray)) and value:
+        return bytes(value)
+    raise RuntimeError("IMAP response did not include the message body")
 
 
 def uid_map(fetched: dict) -> dict[int, dict]:

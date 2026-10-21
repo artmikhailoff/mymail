@@ -1,8 +1,17 @@
-# Local mailbox census — do not commit
+# Local mailbox data — do not commit
+data/mailboxes/
+data/raw/
+data/processed/
+data/bundles/
 data/index.jsonl
 data/stats.json
 data/unsubscribe_log.jsonl
+data/delete_log.jsonl
 data/samples/**
+
+# Extra account credentials (optional)
+credentials/*.env
+!credentials/.gitkeep
 
 # Python
 __pycache__/
