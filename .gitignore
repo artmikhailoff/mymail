@@ -1,6 +1,7 @@
 # Local mailbox census — do not commit
 data/index.jsonl
 data/stats.json
+data/unsubscribe_log.jsonl
 data/samples/**
 
 # Python

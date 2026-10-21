@@ -11,3 +11,7 @@ commits or public docs.
 
 Classification rules live in `scripts/lib/classify.py` and can be extended with
 new domains or subject patterns when a topic is under-counted.
+
+To drop commercial noise: `python scripts/unsubscribe.py` (dry-run), then
+`--apply`. Only `topic=noise` senders; uses List-Unsubscribe / one-click when
+present. Do not unsubscribe health, finance, school, or personal mail.

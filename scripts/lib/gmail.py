@@ -275,12 +275,43 @@ class GmailSession:
 
         return self._call(run)
 
+    def search_gm_msgid(self, msgid: str) -> list[int]:
+        """Locate a message by Gmail's permanent X-GM-MSGID."""
+
+        def run() -> list[int]:
+            assert self.client is not None
+            return [int(uid) for uid in self.client.search(["X-GM-MSGID", int(msgid)])]
+
+        return self._call(run)
+
     def fetch(self, uids: list[int], fields: list[str]) -> dict:
         def run() -> dict:
             assert self.client is not None
             if not uids:
                 return {}
             return dict(self.client.fetch(uids, fields))
+
+        return self._call(run)
+
+    def fetch_headers(self, uid: int) -> bytes:
+        """BODY.PEEK[HEADER] so the message is not marked read."""
+
+        def run() -> bytes:
+            assert self.client is not None
+            fetched = dict(self.client.fetch([uid], ["BODY.PEEK[HEADER]"]))
+            item = fetched.get(uid) or fetched.get(str(uid))
+            if not item:
+                # imapclient sometimes keys by int
+                for key, value in fetched.items():
+                    if int(key) == uid:
+                        item = value
+                        break
+            if not item:
+                raise RuntimeError(f"No HEADER fetch for uid {uid}")
+            raw = _field(item, "BODY[HEADER]", "BODY.PEEK[HEADER]")
+            if isinstance(raw, (bytes, bytearray)) and raw:
+                return bytes(raw)
+            raise RuntimeError(f"Empty HEADER for uid {uid}")
 
         return self._call(run)
 

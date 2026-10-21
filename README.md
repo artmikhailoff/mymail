@@ -13,9 +13,12 @@ mymail/
   scripts/
     scan_mailbox.py   # IMAP scan → classify → write index + stats
     report.py         # Print stats from data/stats.json (or rebuild from index)
+    reclassify.py     # Re-run topic rules on the index
+    unsubscribe.py    # List-Unsubscribe for noise/ad senders
     lib/
       gmail.py        # IMAP session + credentials
       classify.py     # Topic rules
+      unsubscribe.py  # One-click / mailto / HTTP unsubscribe
       stats.py        # Aggregation
       paths.py
 ```
@@ -63,6 +66,28 @@ After editing rules in `scripts/lib/classify.py`, refresh topics without re-down
 ```powershell
 python scripts/reclassify.py
 ```
+
+## Unsubscribe (noise / ads only)
+
+For senders classified as **noise** (promotions, shopping ads, recommendations),
+mymail reads `List-Unsubscribe` / one-click headers and unsubscribes when possible.
+One attempt per sender. The mailbox itself is not modified (no deletes).
+
+Preview what would happen:
+
+```powershell
+python scripts/unsubscribe.py --limit 30
+```
+
+Actually unsubscribe:
+
+```powershell
+python scripts/unsubscribe.py --apply
+python scripts/unsubscribe.py --apply --sender shein.com --sender michaels.com
+```
+
+Results append to `data/unsubscribe_log.jsonl` (gitignored). Already-handled
+senders are skipped unless you pass `--force`.
 
 ## Topics
 
