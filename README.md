@@ -19,6 +19,7 @@ mymail/
     processed/<slug>/<topic>/<year>/  # Plain text for agents
     bundles/<slug>/<topic>.md  # Optional @-mention packs
   scripts/
+    run_all.py            # ← main entry: full pipeline in one command
     scan_mailbox.py
     download_bodies.py
     extract_text.py
@@ -44,22 +45,25 @@ copy .env.example .env
 More accounts: add `credentials/other.env` with the same keys. Select with
 `--mailbox all`, `--mailbox amik1977_at_gmail_com`, or an email address.
 
-## Workflow
+## Main command
+
+One script runs the whole pipeline (scan → download signal topics → extract →
+bundles → unsubscribe ads → trash noise → report):
 
 ```powershell
-python scripts/scan_mailbox.py --check
-python scripts/scan_mailbox.py --since-year 2024
-python scripts/report.py
-
-# Download bodies for health/construction/finance/… (not noise)
-python scripts/download_bodies.py
-python scripts/extract_text.py
-python scripts/build_bundles.py
-
-# Ads: unsubscribe headers, then move remaining noise to Trash
-python scripts/unsubscribe.py --apply
-python scripts/delete_noise.py --apply
+python scripts/run_all.py
 ```
+
+Useful variants:
+
+```powershell
+python scripts/run_all.py --since-year 2024
+python scripts/run_all.py --safe                 # archive only (no unsub/trash)
+python scripts/run_all.py --skip-delete          # unsub but keep noise in mailbox
+python scripts/run_all.py --mailbox all
+```
+
+Individual steps remain available if you need them.
 
 Ask an agent with `@data/bundles/<slug>/health.md` or
 `@data/processed/<slug>/construction/2025/`.

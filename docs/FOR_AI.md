@@ -14,7 +14,8 @@ Year is the finest folder grain. Noise/ads are **not** stored under `raw/`.
 ## Typical agent workflow
 
 1. Ensure `.env` (and optional `credentials/*.env`) have IMAP app passwords.
-2. `python scripts/scan_mailbox.py` then `download_bodies.py` → `extract_text.py` → `build_bundles.py`.
+2. Run the full pipeline: `python scripts/run_all.py` (or `--safe` to skip
+   unsubscribe/trash).
 3. Attach `@data/bundles/<slug>/health.md` (or another topic), or point at
    `data/processed/<slug>/<topic>/<year>/`.
 
