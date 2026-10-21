@@ -26,6 +26,10 @@ bodies or indexes.
 
 - Classify → `topic=noise`
 - `python scripts/unsubscribe.py --apply` (List-Unsubscribe when present)
-- `python scripts/delete_noise.py --apply` (move to Gmail Trash)
+- `python scripts/delete_noise.py --apply` (move classified noise to Gmail Trash)
+- `python scripts/wipe_folders.py --apply` (wipe Promotions + Updates categories,
+  permanently delete Spam, empty Trash)
 
-Do **not** delete health, finance, school, personal, or real shopping/order mail.
+Do **not** delete health, finance, school, personal, or real shopping/order mail
+via `delete_noise` (topic-gated). `wipe_folders` is broader and will remove
+everything Gmail labeled Promotions/Updates.

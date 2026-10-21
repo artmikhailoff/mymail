@@ -7,6 +7,7 @@ data/index.jsonl
 data/stats.json
 data/unsubscribe_log.jsonl
 data/delete_log.jsonl
+data/wipe_log.jsonl
 data/samples/**
 
 # Extra account credentials (optional)

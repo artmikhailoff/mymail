@@ -27,6 +27,7 @@ mymail/
     report.py / reclassify.py
     unsubscribe.py
     delete_noise.py
+    wipe_folders.py       # Promotions / Updates / Spam wipe
 ```
 
 Year is the finest folder grain. **Noise is never downloaded** into `raw/`.
@@ -93,6 +94,21 @@ python scripts/delete_noise.py --limit 50
 python scripts/delete_noise.py --apply
 python scripts/delete_noise.py --apply --sender shein.com
 ```
+
+## Wipe Promotions / Updates / Spam
+
+Gmail’s Promotions and Updates tabs are categories; Spam is a real folder. Wipe all
+of them (and empty Trash so storage can free up):
+
+```powershell
+python scripts/wipe_folders.py              # dry-run counts
+python scripts/wipe_folders.py --apply      # trash categories, delete spam, empty Trash
+```
+
+Included automatically in `run_all.py` unless you pass `--safe` or `--skip-wipe`.
+
+**Note:** Updates can include some transactional mail (shipments, bank notices).
+Wipe means all of that category goes to Trash.
 
 ## Privacy
 

@@ -228,7 +228,9 @@ class GmailSession:
         self.readonly = readonly
         self.client = None
         self.folder: str | None = None
+        self.all_mail_folder: str | None = None
         self.trash_folder: str | None = None
+        self.spam_folder: str | None = None
         self.exists: int | None = None
 
     def __enter__(self) -> GmailSession:
@@ -245,9 +247,10 @@ class GmailSession:
         client = IMAPClient(IMAP_HOST, port=IMAP_PORT, ssl=True, timeout=180)
         try:
             client.login(self.address, self.password)
-            folder = _all_mail_folder(client)
-            selected = client.select_folder(folder, readonly=self.readonly)
+            all_mail = _all_mail_folder(client)
             trash = _flagged_folder(client, "\\Trash")
+            spam = _flagged_folder(client, "\\Junk")
+            selected = client.select_folder(all_mail, readonly=self.readonly)
         except Exception:
             try:
                 client.logout()
@@ -255,10 +258,37 @@ class GmailSession:
                 pass
             raise
         self.client = client
-        self.folder = folder
+        self.all_mail_folder = all_mail
+        self.folder = all_mail
         self.trash_folder = trash
+        self.spam_folder = spam
         exists = selected.get(b"EXISTS", selected.get("EXISTS"))
         self.exists = int(exists) if exists is not None else None
+
+    def select(self, folder: str, *, readonly: bool | None = None) -> int:
+        """Select a folder; returns EXISTS count."""
+        use_ro = self.readonly if readonly is None else readonly
+
+        def run() -> int:
+            assert self.client is not None
+            selected = self.client.select_folder(folder, readonly=use_ro)
+            self.folder = folder
+            exists = selected.get(b"EXISTS", selected.get("EXISTS"))
+            count = int(exists) if exists is not None else 0
+            if folder == self.all_mail_folder:
+                self.exists = count
+            return count
+
+        return self._call(run)
+
+    def search_all_uids(self) -> list[int]:
+        """UID SEARCH ALL in the currently selected folder."""
+
+        def run() -> list[int]:
+            assert self.client is not None
+            return [int(uid) for uid in self.client.search(["ALL"])]
+
+        return self._call(run)
 
     def close(self) -> None:
         client = self.client
@@ -343,6 +373,38 @@ class GmailSession:
             return len(uids)
 
         return self._call(run)
+
+    def delete_permanent(self, uids: list[int]) -> int:
+        """Flag deleted + expunge (used for Spam wipe)."""
+        if not uids:
+            return 0
+        if self.readonly:
+            raise RuntimeError("delete_permanent requires GmailSession(readonly=False)")
+
+        def run() -> int:
+            assert self.client is not None
+            self.client.delete_messages(uids)
+            self.client.expunge()
+            return len(uids)
+
+        return self._call(run)
+
+    def empty_trash(self) -> int:
+        """Permanently delete everything currently in Trash."""
+        if self.readonly:
+            raise RuntimeError("empty_trash requires GmailSession(readonly=False)")
+        trash = self.trash_folder
+        if not trash:
+            raise RuntimeError("Could not find Gmail Trash folder")
+        count = self.select(trash, readonly=False)
+        uids = self.search_all_uids()
+        deleted = 0
+        for batch in chunks(uids, 500):
+            deleted += self.delete_permanent(batch)
+        # Return to All Mail.
+        if self.all_mail_folder:
+            self.select(self.all_mail_folder, readonly=False)
+        return deleted if uids else count
 
     def _call(self, fn: Callable[[], T]) -> T:
         from imapclient.exceptions import IMAPClientAbortError, IMAPClientError, LoginError

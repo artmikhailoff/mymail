@@ -6,8 +6,9 @@ Default pipeline:
   3. extract_text
   4. build_bundles
   5. unsubscribe --apply
-  6. delete_noise --apply  (→ Gmail Trash)
-  7. report
+  6. delete_noise --apply  (classified noise → Trash)
+  7. wipe_folders --apply  (Promotions + Updates → Trash, Spam delete, empty Trash)
+  8. report
 
 Examples:
   python scripts/run_all.py
@@ -70,7 +71,7 @@ def main() -> int:
     parser.add_argument(
         "--safe",
         action="store_true",
-        help="Skip unsubscribe and delete_noise (archive only)",
+        help="Skip unsubscribe, delete_noise, and wipe_folders (archive only)",
     )
     parser.add_argument(
         "--skip-scan",
@@ -90,7 +91,12 @@ def main() -> int:
     parser.add_argument(
         "--skip-delete",
         action="store_true",
-        help="Skip moving noise to Trash",
+        help="Skip moving classified noise to Trash",
+    )
+    parser.add_argument(
+        "--skip-wipe",
+        action="store_true",
+        help="Skip wiping Promotions / Updates / Spam",
     )
     parser.add_argument(
         "--include-accounts",
@@ -149,6 +155,11 @@ def main() -> int:
 
     if not args.safe and not args.skip_delete:
         code = _run("delete_noise.py", [*mailbox_args, "--apply"])
+        if code != 0:
+            return code
+
+    if not args.safe and not args.skip_wipe:
+        code = _run("wipe_folders.py", [*mailbox_args, "--apply"])
         if code != 0:
             return code
 

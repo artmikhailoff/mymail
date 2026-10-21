@@ -76,6 +76,10 @@ def delete_log_path(slug: str) -> Path:
     return mailbox_dir(slug) / "delete_log.jsonl"
 
 
+def wipe_log_path(slug: str) -> Path:
+    return mailbox_dir(slug) / "wipe_log.jsonl"
+
+
 def mailbox_meta_path(slug: str) -> Path:
     return mailbox_dir(slug) / "mailbox.json"
 
