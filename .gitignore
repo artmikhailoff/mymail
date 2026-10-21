@@ -1,0 +1,15 @@
+# Local mailbox census — do not commit
+data/index.jsonl
+data/stats.json
+data/samples/**
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
