@@ -3,6 +3,9 @@ data/mailboxes/
 data/raw/
 data/processed/
 data/bundles/
+data/store/
+data/kb/
+data/digests/
 data/index.jsonl
 data/stats.json
 data/unsubscribe_log.jsonl

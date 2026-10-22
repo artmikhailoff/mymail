@@ -232,9 +232,24 @@ class GmailSession:
         self.trash_folder: str | None = None
         self.spam_folder: str | None = None
         self.exists: int | None = None
+        self.uidvalidity: int | None = None
+        self.uidnext: int | None = None
 
     def __enter__(self) -> GmailSession:
-        self.connect()
+        from imapclient.exceptions import LoginError
+
+        delay = 5.0
+        for attempt in range(4):
+            try:
+                self.connect()
+                return self
+            except LoginError:
+                raise
+            except (OSError, TimeoutError, ConnectionError):
+                if attempt == 3:
+                    raise
+                time.sleep(delay)
+                delay *= 2
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -264,6 +279,58 @@ class GmailSession:
         self.spam_folder = spam
         exists = selected.get(b"EXISTS", selected.get("EXISTS"))
         self.exists = int(exists) if exists is not None else None
+        self._remember_uid_state(selected)
+
+    def _remember_uid_state(self, selected: dict) -> None:
+        validity = selected.get(b"UIDVALIDITY", selected.get("UIDVALIDITY"))
+        uidnext = selected.get(b"UIDNEXT", selected.get("UIDNEXT"))
+        self.uidvalidity = int(validity) if validity is not None else None
+        self.uidnext = int(uidnext) if uidnext is not None else None
+
+    def search_uids_after(self, last_uid: int) -> list[int]:
+        """UIDs strictly greater than last_uid in the selected folder."""
+
+        def run() -> list[int]:
+            assert self.client is not None
+            found = self.client.search(["UID", f"{last_uid + 1}:*"])
+            # "N:*" always matches the highest UID even when it is <= last_uid.
+            return sorted(int(uid) for uid in found if int(uid) > last_uid)
+
+        return self._call(run)
+
+    def add_labels(self, uids: list[int], labels: list[str]) -> None:
+        if not uids:
+            return
+        if self.readonly:
+            raise RuntimeError("add_labels requires GmailSession(readonly=False)")
+
+        def run() -> None:
+            assert self.client is not None
+            self.client.add_gmail_labels(uids, labels, silent=True)
+
+        self._call(run)
+
+    def archive(self, uids: list[int]) -> int:
+        """Remove from Inbox (Gmail 'Archive'); message stays in All Mail."""
+        if not uids:
+            return 0
+        if self.readonly:
+            raise RuntimeError("archive requires GmailSession(readonly=False)")
+
+        def run() -> int:
+            assert self.client is not None
+            self.client.remove_gmail_labels(uids, ["\\Inbox"], silent=True)
+            return len(uids)
+
+        return self._call(run)
+
+    def create_folder(self, name: str) -> None:
+        def run() -> None:
+            assert self.client is not None
+            if not self.client.folder_exists(name):
+                self.client.create_folder(name)
+
+        self._call(run)
 
     def select(self, folder: str, *, readonly: bool | None = None) -> int:
         """Select a folder; returns EXISTS count."""
@@ -277,6 +344,7 @@ class GmailSession:
             count = int(exists) if exists is not None else 0
             if folder == self.all_mail_folder:
                 self.exists = count
+                self._remember_uid_state(selected)
             return count
 
         return self._call(run)

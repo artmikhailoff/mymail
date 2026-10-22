@@ -1,0 +1,28 @@
+---
+description: How to answer questions about the user's email (mymail knowledge base)
+alwaysApply: true
+---
+
+# Answering mail questions (mymail)
+
+Mail data is personal: summarize, never commit `data/` or credentials.
+
+Cheapest path first:
+
+1. **KB summaries** — `data/kb/<mailbox>/{overview,spending,bills,health,contacts,action}.md`
+   (pre-aggregated, a few KB each). Many questions are answered here.
+2. **SQL** — `python scripts/ask.py "<SELECT ...>"` against `data/store/mail.db`
+   (read-only; schema in `docs/SCHEMA.md`, or `python scripts/ask.py schema`).
+   - spend: `python scripts/ask.py spend --category construction --year 2022`
+     (`--items` lists rows, `--by "vendor, year"` regroups). Uses `v_spend`.
+   - full text: `python scripts/ask.py search "roof leak" --topic construction`
+   - one message: `python scripts/ask.py msg <gmail_msgid>`
+3. **Raw text** — only when 1–2 are insufficient, read the `text_path` of
+   specific messages (`data/processed/<mailbox>/<topic>/<year>/<msgid>.txt`).
+   Never bulk-read folders.
+
+Facts tables cover Home Depot, Amazon, Ally alerts and finance notices only;
+for other vendors say so and fall back to `message_text` search.
+
+Refreshing data: `python scripts/mymail.py daily` (incremental; `--safe` makes
+no Gmail changes). Triage rules: `config/rules.toml`.

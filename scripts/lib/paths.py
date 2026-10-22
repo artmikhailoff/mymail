@@ -80,6 +80,22 @@ def wipe_log_path(slug: str) -> Path:
     return mailbox_dir(slug) / "wipe_log.jsonl"
 
 
+STORE_DIR = DATA_DIR / "store"
+DB_PATH = STORE_DIR / "mail.db"
+KB_DIR = DATA_DIR / "kb"
+DIGESTS_DIR = DATA_DIR / "digests"
+CONFIG_DIR = REPO_ROOT / "config"
+RULES_PATH = CONFIG_DIR / "rules.toml"
+
+
+def rel_path(path: Path) -> str:
+    """Repo-relative posix path (what the DB stores)."""
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def mailbox_meta_path(slug: str) -> Path:
     return mailbox_dir(slug) / "mailbox.json"
 

@@ -1,36 +1,85 @@
 # mymail
 
-Personal Gmail census and archive: classify mail into topics, download signal
-buckets for agent Q&A, unsubscribe from ads, and trash marketing noise.
+Personal Gmail assistant: keep the Inbox down to mail that actually needs you,
+archive everything worth keeping into a local SQLite knowledge base, and kill
+marketing noise (unsubscribe + delete).
+
+## Main command
+
+```powershell
+python scripts/mymail.py daily
+```
+
+Runs, incrementally and safe to rerun:
+
+1. **sync** – catalog new mail only (All Mail UIDs above the last watermark)
+2. **download** – fetch bodies for signal topics not downloaded yet
+3. **text** – plain text for new bodies
+4. **extract** – transactions / bills / documents / contacts + full-text index
+5. **triage** – priority `action | fyi | archive | junk` from `config/rules.toml`
+6. **inbox** – label `mymail/action`, `mymail/fyi`; archive the rest out of Inbox
+7. **clean** – unsubscribe + delete junk, wipe Promotions/Updates (junk and
+   uncatalogued only; anything triage keeps is spared) and Spam, empty Trash
+8. **reconcile** – mark catalogued messages that are no longer in Gmail as `gone`
+9. **kb** – regenerate `data/kb/<mailbox>/*.md`
+10. **digest** – `data/digests/<mailbox>/YYYY-MM-DD.md`
+
+(`reclassify` also runs right after sync so classifier fixes apply retroactively.)
+Action items older than 30 days become fyi, fyi older than 60 days leaves the
+Inbox — both tunable in `config/rules.toml`.
+
+Variants:
+
+```powershell
+python scripts/mymail.py daily --safe          # read-only on Gmail (no inbox/clean)
+python scripts/mymail.py daily --skip-clean    # inbox tidy but no unsub/delete
+python scripts/mymail.py daily --max-mb 5      # skip downloading huge messages
+python scripts/mymail.py sync --full --since-year 2008   # rescan whole years
+```
+
+Each step is also a subcommand (`sync`, `download`, `text`, `extract`, `triage`,
+`inbox [--apply]`, `clean`, `kb`, `digest`, `migrate`). `run_all.py` is an alias
+for `daily`.
+
+## Asking questions
+
+```powershell
+python scripts/ask.py spend --category construction --year 2022
+python scripts/ask.py spend --by "project" --vendor "Home Depot"
+python scripts/ask.py search "warranty" --topic construction
+python scripts/ask.py "SELECT date, subject FROM messages WHERE priority='action'"
+python scripts/ask.py schema
+```
+
+In Cursor, just ask; `.cursor/rules/mymail.mdc` tells the agent to read
+`data/kb/` and query the DB before opening raw mail. Schema: `docs/SCHEMA.md`.
+
+## Incremental state
+
+- `sync_state.last_uid` per mailbox: next sync only looks at newer UIDs
+  (if Gmail resets UIDVALIDITY, sync catches up by date instead).
+- `messages.raw_path` / `text_path`: a body is downloaded and extracted once.
+- `extraction_log`: each extractor runs once per message per version.
+- `messages.gone`: messages deleted from Gmail stay in the catalog, never refetched.
 
 ## Layout
 
 ```
-mymail/
-  credentials/                 # Optional extra *.env mailboxes (gitignored)
-  data/
-    mailboxes/<slug>/
-      mailbox.json
-      index.jsonl              # Header census + topic
-      stats.json
-      unsubscribe_log.jsonl
-      delete_log.jsonl
-    raw/<slug>/<topic>/<year>/ # Full .eml + .meta.json (signal topics only)
-    processed/<slug>/<topic>/<year>/  # Plain text for agents
-    bundles/<slug>/<topic>.md  # Optional @-mention packs
-  scripts/
-    run_all.py            # ← main entry: full pipeline in one command
-    scan_mailbox.py
-    download_bodies.py
-    extract_text.py
-    build_bundles.py
-    report.py / reclassify.py
-    unsubscribe.py
-    delete_noise.py
-    wipe_folders.py       # Promotions / Updates / Spam wipe
+config/rules.toml                 # VIP / keep / block senders, action & archive patterns
+data/                             # all gitignored (personal data)
+  store/mail.db                   # SQLite catalog + facts + FTS
+  kb/<slug>/*.md                  # small pre-aggregated summaries
+  digests/<slug>/YYYY-MM-DD.md
+  raw/<slug>/<topic>/<year>/      # .eml + .meta.json (signal topics only)
+  processed/<slug>/<topic>/<year>/# .txt
+  mailboxes/<slug>/               # index.jsonl + unsubscribe/delete/wipe/inbox logs
+scripts/
+  mymail.py                       # CLI (main entry)
+  ask.py                          # read-only queries
+  lib/{db,pipeline,triage,extract,kb,digest,inbox,classify,gmail,...}.py
+  unsubscribe.py delete_noise.py wipe_folders.py   # used by `clean`
+  scan_mailbox.py download_bodies.py ...           # legacy single steps
 ```
-
-Year is the finest folder grain. **Noise is never downloaded** into `raw/`.
 
 ## Setup
 
@@ -39,77 +88,24 @@ cd c:\Users\ffldr\Desktop\code\mymail
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
-# Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD
+copy .env.example .env   # GMAIL_ADDRESS + GMAIL_APP_PASSWORD (IMAP app password)
 ```
 
-More accounts: add `credentials/other.env` with the same keys. Select with
-`--mailbox all`, `--mailbox amik1977_at_gmail_com`, or an email address.
-
-## Main command
-
-One script runs the whole pipeline (scan → download signal topics → extract →
-bundles → unsubscribe ads → trash noise → report):
-
-```powershell
-python scripts/run_all.py
-```
-
-Useful variants:
-
-```powershell
-python scripts/run_all.py --since-year 2024
-python scripts/run_all.py --safe                 # archive only (no unsub/trash)
-python scripts/run_all.py --skip-delete          # unsub but keep noise in mailbox
-python scripts/run_all.py --mailbox all
-```
-
-Individual steps remain available if you need them.
-
-Ask an agent with `@data/bundles/<slug>/health.md` or
-`@data/processed/<slug>/construction/2025/`.
+More accounts: `credentials/<name>.env` with the same keys; select with
+`--mailbox all | <slug> | <email>`.
 
 ## Topics
 
 | Topic | Meaning | Downloaded? |
 |-------|---------|-------------|
-| `noise` | Promotions, social, ads | No (unsubscribe + trash) |
-| `health` | Labs, clinics, insurance | Yes |
-| `construction` | Home improvement / building | Yes |
-| `finance` | Banks, cards, taxes | Yes |
-| `travel` | Flights, hotels | Yes |
-| `school` | ParentSquare, schools | Yes |
-| `shopping` | Orders / shipping | Yes |
-| `personal` | Human correspondence | Yes |
+| `noise` | Promotions, social, ads | No (unsubscribe + delete) |
+| `health`, `construction`, `finance`, `travel`, `school`, `shopping`, `personal` | signal | Yes |
 | `accounts` | OTP / SaaS | Opt-in (`--include-accounts`) |
 | `other` | Unclassified | Opt-in (`--include-other`) |
 
-## Delete marketing mail
-
-`delete_noise.py` moves **topic=noise** messages to Gmail Trash (recoverable ~30 days).
-Dry-run by default:
-
-```powershell
-python scripts/delete_noise.py --limit 50
-python scripts/delete_noise.py --apply
-python scripts/delete_noise.py --apply --sender shein.com
-```
-
-## Wipe Promotions / Updates / Spam
-
-Gmail’s Promotions and Updates tabs are categories; Spam is a real folder. Wipe all
-of them (and empty Trash so storage can free up):
-
-```powershell
-python scripts/wipe_folders.py              # dry-run counts
-python scripts/wipe_folders.py --apply      # trash categories, delete spam, empty Trash
-```
-
-Included automatically in `run_all.py` unless you pass `--safe` or `--skip-wipe`.
-
-**Note:** Updates can include some transactional mail (shipments, bank notices).
-Wipe means all of that category goes to Trash.
+Senders in `[keep]` (banks, IRS...) are never treated as junk even if the
+classifier says noise.
 
 ## Privacy
 
-All of `data/` census/archives and `.env` / `credentials/*.env` are **gitignored**.
+`data/`, `.env` and `credentials/*.env` are gitignored. Never commit them.

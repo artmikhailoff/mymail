@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.lib.accounts import resolve_accounts  # noqa: E402
 from scripts.lib.gmail import GmailSession, chunks  # noqa: E402
+from scripts.lib import db  # noqa: E402
 from scripts.lib.paths import REPO_ROOT, delete_log_path, index_path  # noqa: E402
 from scripts.lib.stats import load_index, sender_key  # noqa: E402
 
@@ -46,7 +47,7 @@ def _load_deleted(path: Path) -> set[str]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if row.get("status") == "ok":
+        if row.get("status") in ("ok", "missing"):
             msgid = str(row.get("gmail_msgid") or "")
             if msgid.isdigit():
                 done.add(msgid)
@@ -128,6 +129,9 @@ def main() -> int:
     for account in accounts:
         records = load_index(index_path(account.slug))
         noise = [row for row in records if str(row.get("topic") or "") == "noise"]
+        junk = db.junk_msgids(account.slug)
+        if junk is not None:
+            noise = [row for row in noise if str(row.get("gmail_msgid")) in junk]
         if args.senders:
             needles = [s.lower() for s in args.senders]
             noise = [

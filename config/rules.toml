@@ -1,0 +1,93 @@
+# mymail triage rules. Edit freely; the next `mymail triage` / `daily` applies them.
+#
+# Sender patterns are case-insensitive and match either a full address
+# ("bob@example.com") or a domain ("example.com", which also matches subdomains).
+# Subject patterns are Python regular expressions (case-insensitive).
+#
+# Priorities, strongest first:
+#   junk    -> marketing/noise; unsubscribed + deleted by `mymail clean`
+#   action  -> needs you; stays in Inbox, labeled mymail/action, top of the digest
+#   fyi     -> worth knowing; stays in Inbox, labeled mymail/fyi
+#   archive -> kept in the DB/archive but removed from Inbox
+
+[vip]
+# Always "action" (family, contractor, doctor, lawyer, accountant...).
+senders = []
+
+[block]
+# Always "junk", whatever the classifier says.
+senders = []
+
+[keep]
+# Never "junk" (protects against misclassification). Floor is "fyi".
+senders = [
+    "chase.com",
+    "ally.com",
+    "paypal.com",
+    "irs.gov",
+    "ct.gov",
+]
+
+[action]
+# Older "action" candidates are demoted to "fyi" (you can't act on a 2015 invoice).
+max_age_days = 30
+# Promotional wording never makes a message "action" ("your discount expires").
+exclude_patterns = [
+    '\b(discount|coupon|promo|deal|sale|savings|reward|points|offer)s?\b',
+    '\d+% off',
+]
+subject_patterns = [
+    '\baction (required|needed)\b',
+    '\b(past due|overdue|final notice|payment failed|failed payment)\b',
+    '\bpayment (is )?due\b',
+    '\bdue (today|tomorrow|soon)\b',
+    '\bdeclined\b',
+    '\b(suspicious|unusual|unrecognized) (activity|sign-?in|login)\b',
+    "\\bwasn't you\\b",
+    '\bnew inquiry on your credit report\b',
+    '\b(expires|expiring|expired)\b',
+    '\brenewal (notice|due|reminder)\b',
+    '\bappointment\b',
+    '\b(test|lab) results?\b',
+    '\bresults are (ready|available)\b',
+    '\bplease (sign|review|respond|confirm|reply)\b',
+    '\b(signature|e-?sign) (required|requested)\b',
+    '\bdocusign\b',
+    '\binvoice\b',
+    '\bbill is (ready|due|available)\b',
+    '\bjury\b',
+    '\bpermit\b',
+    '\binspection\b',
+]
+
+[fyi]
+# FYI mail older than this leaves the Inbox (priority becomes "archive").
+max_age_days = 60
+
+[archive]
+# Signal mail that is captured in the DB but does not deserve Inbox space.
+topics = ["shopping", "accounts", "other"]
+subject_patterns = [
+    'debit is above the transaction amount',
+    'pending debit',
+    'deposit (just hit|was made)',
+    'echeck deposit',
+    'funds availability',
+    'transfer (is complete|request)',
+    'start your next transfer',
+    'account balance alert',
+    '\bhas shipped\b',
+    '^delivered:',
+    'now arriving',
+    'out for delivery',
+    'delivery estimate',
+    'verification code',
+    "code you requested",
+    'signed in with a new device',
+    'login from a new device',
+    'credit (summary|usage|balance change)',
+    'privacy notice',
+    'legal agreements',
+    'review your recent activity',
+    'cash back coming',
+]

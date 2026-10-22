@@ -21,8 +21,27 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.lib.accounts import resolve_accounts  # noqa: E402
-from scripts.lib.gmail import GmailSession, chunks  # noqa: E402
-from scripts.lib.paths import REPO_ROOT, wipe_log_path  # noqa: E402
+from scripts.lib.gmail import GmailSession, chunks, gmail_msgid, uid_map  # noqa: E402
+from scripts.lib.paths import DB_PATH, REPO_ROOT, wipe_log_path  # noqa: E402
+
+
+def _protected_msgids(slug: str) -> set[str]:
+    """Messages triage keeps (anything but junk) are never wiped."""
+    if not DB_PATH.is_file():
+        return set()
+    from scripts.lib import db
+
+    conn = db.connect(readonly=True)
+    try:
+        return {
+            row[0]
+            for row in conn.execute(
+                "SELECT gmail_msgid FROM messages WHERE mailbox = ? AND priority <> 'junk'",
+                (slug,),
+            )
+        }
+    finally:
+        conn.close()
 
 # Gmail category queries (All Mail) + real Spam folder.
 DEFAULT_TARGETS = ("promotions", "updates", "spam")
@@ -54,6 +73,7 @@ def _wipe_category(
     batch_size: int,
     delay: float,
     log_path: Path,
+    protected: set[str],
 ) -> int:
     print(f"  [{name}] searching: {query}", flush=True)
     # Ensure All Mail selected for category searches.
@@ -61,6 +81,16 @@ def _wipe_category(
         gmail.select(gmail.all_mail_folder, readonly=False)
     uids = gmail.search_raw(query)
     print(f"  [{name}] matched {len(uids)}", flush=True)
+    if uids and protected:
+        kept = []
+        for batch in chunks(uids, 500):
+            for uid, item in uid_map(gmail.fetch(batch, ["X-GM-MSGID"])).items():
+                if gmail_msgid(item) in protected:
+                    kept.append(uid)
+        if kept:
+            keep = set(kept)
+            uids = [uid for uid in uids if uid not in keep]
+            print(f"  [{name}] keeping {len(kept)} non-junk message(s)", flush=True)
     if not uids:
         _append_log(
             log_path,
@@ -221,25 +251,19 @@ def main() -> int:
                     flush=True,
                 )
                 totals: dict[str, int] = {}
-                if "promotions" in targets:
-                    totals["promotions"] = _wipe_category(
+                protected = _protected_msgids(account.slug)
+                for category in ("promotions", "updates"):
+                    if category not in targets:
+                        continue
+                    totals[category] = _wipe_category(
                         gmail,
-                        name="promotions",
-                        query="category:promotions",
+                        name=category,
+                        query=f"category:{category}",
                         apply=args.apply,
                         batch_size=args.batch_size,
                         delay=args.delay,
                         log_path=log_path,
-                    )
-                if "updates" in targets:
-                    totals["updates"] = _wipe_category(
-                        gmail,
-                        name="updates",
-                        query="category:updates",
-                        apply=args.apply,
-                        batch_size=args.batch_size,
-                        delay=args.delay,
-                        log_path=log_path,
+                        protected=protected,
                     )
                 if "spam" in targets:
                     totals["spam"] = _wipe_spam(

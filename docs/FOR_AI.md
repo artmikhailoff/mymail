@@ -1,35 +1,24 @@
 # Using mymail with Cursor
 
-## Data layout
+Mailbox contents are **personal data**: summarize, never commit `data/`.
 
-```
-data/mailboxes/<slug>/index.jsonl     # census + topic labels
-data/raw/<slug>/<topic>/<year>/       # full .eml (signal topics only)
-data/processed/<slug>/<topic>/<year>/ # plain text for reading
-data/bundles/<slug>/<topic>.md        # curated packs for @-mentions
-```
+## Where answers live (cheapest first)
 
-Year is the finest folder grain. Noise/ads are **not** stored under `raw/`.
+1. `data/kb/<slug>/*.md` — overview, spending, bills, health, contacts, action.
+2. `data/store/mail.db` via `python scripts/ask.py` — see `docs/SCHEMA.md`.
+   - `ask.py spend --category construction --year 2022 [--items]`
+   - `ask.py search "<fts query>" [--topic T] [--year Y]`
+   - `ask.py msg <gmail_msgid>`
+3. `text_path` files for specific messages only.
 
-## Typical agent workflow
+## Refresh
 
-1. Ensure `.env` (and optional `credentials/*.env`) have IMAP app passwords.
-2. Run the full pipeline: `python scripts/run_all.py` (or `--safe` to skip
-   unsubscribe/trash).
-3. Attach `@data/bundles/<slug>/health.md` (or another topic), or point at
-   `data/processed/<slug>/<topic>/<year>/`.
+`python scripts/mymail.py daily` (incremental). `--safe` = no Gmail changes.
 
-Treat mailbox contents as **personal data**. Prefer summarizing; do not commit
-bodies or indexes.
+## Deletion policy
 
-## Marketing noise
-
-- Classify → `topic=noise`
-- `python scripts/unsubscribe.py --apply` (List-Unsubscribe when present)
-- `python scripts/delete_noise.py --apply` (move classified noise to Gmail Trash)
-- `python scripts/wipe_folders.py --apply` (wipe Promotions + Updates categories,
-  permanently delete Spam, empty Trash)
-
-Do **not** delete health, finance, school, personal, or real shopping/order mail
-via `delete_noise` (topic-gated). `wipe_folders` is broader and will remove
-everything Gmail labeled Promotions/Updates.
+- Only `priority = junk` (topic noise, or `[block]` senders) is unsubscribed
+  and deleted. `[keep]` senders are never junk.
+- `wipe_folders` empties Promotions/Updates but skips every catalogued
+  message that is not junk; Spam is deleted outright.
+- `archive` priority only removes mail from the Inbox; it stays in Gmail.

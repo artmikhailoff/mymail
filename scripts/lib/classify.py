@@ -432,6 +432,23 @@ _ACCOUNTS_SUBJECT = re.compile(
     re.IGNORECASE,
 )
 
+# "Your Savings Bank Statement" / "Rewards Card Statement" are not promos.
+_STATEMENT_SUBJECT = re.compile(r"\b(statement|receipt|invoice|autopay)\b", re.IGNORECASE)
+
+_REPLY_SUBJECT = re.compile(r"^\s*(re|fw|fwd|aw|ответ|отв)\s*:", re.IGNORECASE)
+
+_TRANSACTIONAL_SUBJECT = re.compile(
+    r"("
+    r"\b(receipts?|invoice|statement|refund|autopay|auto-pay|shipped|delivered|tracking|dismissal)\b|"
+    r"\byour\s+(\w+\s+){0,3}(order|orders|trip|ride|booking|reservation|payment|bill|"
+    r"shipping|subscription|policy|appointment|listing|claim)\b|"
+    r"\bstay at\b|\bappointment\b|"
+    r"\border\s+(#|number|confirm)|\bpayment\b|"
+    r"чек|квитанц|автоплат|сч[её]т|заказ"
+    r")",
+    re.IGNORECASE,
+)
+
 _NOISE_SUBJECT = re.compile(
     r"("
     r"%\s*off|up\s+to\s+\$|sale\s+ends|flash\s+sale|limited\s+time|"
@@ -487,6 +504,12 @@ def classify_message(
     subject_text = subject or ""
     labels_l = _label_set(labels)
     reasons: list[str] = []
+    # Weak noise rules (sender local-part only) must not junk these.
+    protected = (
+        bool(_REPLY_SUBJECT.match(subject_text))
+        or "\\important" in labels_l
+        or bool(_TRANSACTIONAL_SUBJECT.search(subject_text))
+    )
 
     # Gmail categories are a strong noise signal.
     if any("category_promotions" in lab or lab.endswith("promotions") for lab in labels_l):
@@ -494,8 +517,13 @@ def classify_message(
     if any("category_social" in lab or lab.endswith("social") for lab in labels_l):
         return Classification("noise", ("gmail social",), "high")
 
-    # Promo subject wins over retailer/bank domains (ads ≠ real topic mail).
-    if _NOISE_SUBJECT.search(subject_text):
+    # Promo subject wins over retailer/bank domains (ads ≠ real topic mail),
+    # but schools and doctors don't advertise ("Grade 2 Newsletter" is school).
+    if _NOISE_SUBJECT.search(subject_text) and not (
+        _domain_matches(domain, SCHOOL_DOMAINS)
+        or _domain_matches(domain, HEALTH_DOMAINS)
+        or _STATEMENT_SUBJECT.search(subject_text)
+    ):
         return Classification("noise", ("noise subject",), "medium")
 
     if any(fragment in domain for fragment in _MARKETING_HOST_FRAGMENTS):
@@ -515,7 +543,7 @@ def classify_message(
         hit = _domain_matches(domain, domains)
         if hit:
             # Marketing@ / newsletter hosts under a topic domain → still noise.
-            if topic in _PROMO_TOPICS and (
+            if topic in _PROMO_TOPICS and not protected and (
                 NOREPLY_LOCAL.match(local)
                 or any(tok in local for tok in _PROMO_LOCAL_TOKENS)
             ):
@@ -541,7 +569,7 @@ def classify_message(
 
     # Updates category without a topic match → often transactional noise-adjacent.
     if any("category_updates" in lab or lab.endswith("updates") for lab in labels_l):
-        if NOREPLY_LOCAL.match(local):
+        if NOREPLY_LOCAL.match(local) and not protected:
             return Classification("noise", ("gmail updates + noreply",), "medium")
         return Classification("other", ("gmail updates",), "low")
 
@@ -555,6 +583,8 @@ def classify_message(
             return Classification("personal", tuple(reasons), "medium")
 
     if NOREPLY_LOCAL.match(local) or "noreply" in local or "no-reply" in local:
+        if protected:
+            return Classification("other", ("automated, but reply/important/transactional",), "low")
         return Classification("noise", ("noreply local-part",), "low")
 
     return Classification("other", ("no strong rule",), "low")

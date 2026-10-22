@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.lib import db  # noqa: E402
 from scripts.lib.accounts import resolve_accounts  # noqa: E402
 from scripts.lib.gmail import GmailSession  # noqa: E402
 from scripts.lib.paths import REPO_ROOT, index_path, unsubscribe_log_path  # noqa: E402
@@ -115,6 +116,9 @@ def main() -> int:
             print(f"skip {account.slug}: no index")
             continue
 
+        junk = db.junk_msgids(account.slug)
+        if junk is not None:
+            records = [row for row in records if str(row.get("gmail_msgid")) in junk]
         candidates = noise_candidates(records)
         if args.senders:
             needles = [s.lower() for s in args.senders]
