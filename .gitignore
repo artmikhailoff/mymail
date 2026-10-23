@@ -6,6 +6,7 @@ data/bundles/
 data/store/
 data/kb/
 data/digests/
+data/logs/
 data/index.jsonl
 data/stats.json
 data/unsubscribe_log.jsonl

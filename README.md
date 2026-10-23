@@ -22,7 +22,8 @@ Runs, incrementally and safe to rerun:
    uncatalogued only; anything triage keeps is spared) and Spam, empty Trash
 8. **reconcile** – mark catalogued messages that are no longer in Gmail as `gone`
 9. **kb** – regenerate `data/kb/<mailbox>/*.md`
-10. **digest** – `data/digests/<mailbox>/YYYY-MM-DD.md`
+10. **digest** – `data/digests/<mailbox>/YYYY-MM-DD.md`, `week.md`, and `month.md`,
+    then email those three digests to that mailbox
 
 (`reclassify` also runs right after sync so classifier fixes apply retroactively.)
 Action items older than 30 days become fyi, fyi older than 60 days leaves the
@@ -33,13 +34,30 @@ Variants:
 ```powershell
 python scripts/mymail.py daily --safe          # read-only on Gmail (no inbox/clean)
 python scripts/mymail.py daily --skip-clean    # inbox tidy but no unsub/delete
+python scripts/mymail.py daily --skip-email    # write digests, do not send them (testing)
 python scripts/mymail.py daily --max-mb 5      # skip downloading huge messages
 python scripts/mymail.py sync --full --since-year 2008   # rescan whole years
 ```
 
 Each step is also a subcommand (`sync`, `download`, `text`, `extract`, `triage`,
 `inbox [--apply]`, `clean`, `kb`, `digest`, `migrate`). `run_all.py` is an alias
-for `daily`.
+for `daily`. `--skip-email` on `daily` or `digest` writes the files and skips
+the send.
+
+## Morning automation
+
+Full pipeline every day at 08:00 (no `--safe`, `--skip-clean`, or `--skip-email`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_morning_task.ps1
+```
+
+That registers scheduled task `mymail-morning` (daily 08:00, StartWhenAvailable,
+WakeToRun, Interactive — stay logged on). `scripts/morning.ps1` runs
+`python -u scripts/mymail.py daily` and logs to `data/logs/morning-YYYY-MM-DD.log`.
+
+After each mailbox’s digests are written (`YYYY-MM-DD.md`, `week.md`, `month.md`),
+they are emailed to that mailbox.
 
 ## Asking questions
 
@@ -69,7 +87,8 @@ config/rules.toml                 # VIP / keep / block senders, action & archive
 data/                             # all gitignored (personal data)
   store/mail.db                   # SQLite catalog + facts + FTS
   kb/<slug>/*.md                  # small pre-aggregated summaries
-  digests/<slug>/YYYY-MM-DD.md
+  digests/<slug>/YYYY-MM-DD.md week.md month.md
+  logs/                           # morning-YYYY-MM-DD.log
   raw/<slug>/<topic>/<year>/      # .eml + .meta.json (signal topics only)
   processed/<slug>/<topic>/<year>/# .txt
   mailboxes/<slug>/               # index.jsonl + unsubscribe/delete/wipe/inbox logs

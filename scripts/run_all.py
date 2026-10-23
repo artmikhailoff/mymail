@@ -2,7 +2,7 @@
 
 Old flags map onto the new pipeline: --fresh -> --full, --skip-scan is ignored
 (sync is incremental and takes seconds), --skip-unsubscribe/--skip-delete/
---skip-wipe/--safe/--skip-download are passed through.
+--skip-wipe/--safe/--skip-download/--skip-email are passed through.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def main() -> int:
     parser.add_argument("--skip-scan", action="store_true")
     passthrough = (
         "--safe", "--skip-download", "--skip-unsubscribe", "--skip-delete", "--skip-wipe",
-        "--include-accounts", "--include-other",
+        "--skip-email", "--include-accounts", "--include-other",
     )
     for flag in passthrough:
         parser.add_argument(flag, action="store_true")

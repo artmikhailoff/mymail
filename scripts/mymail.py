@@ -1,7 +1,7 @@
 """mymail — one CLI for the whole pipeline.
 
   daily     sync -> reclassify -> download -> text -> extract -> triage -> inbox -> clean
-            -> reconcile -> kb -> digest
+            -> reconcile -> kb -> digest -> email digests
   reconcile mark catalogued messages that are no longer in Gmail as gone
   migrate   import legacy index.jsonl + already-downloaded files into data/store/mail.db
   sync      catalog new mail (incremental: only UIDs above the last sync)
@@ -13,7 +13,8 @@
   inbox     label action/fyi and archive the rest of the Inbox (dry run without --apply)
   clean     unsubscribe + delete noise + wipe Promotions/Updates/Spam
   kb        regenerate data/kb/<mailbox>/*.md
-  digest    write data/digests/<mailbox>/YYYY-MM-DD.md
+  digest    write data/digests/<mailbox>/YYYY-MM-DD.md, week.md, and month.md
+            and email them (--skip-email writes files only)
   ask       run read-only SQL against mail.db (see scripts/ask.py)
 
 Every step is incremental and safe to rerun.
@@ -197,17 +198,62 @@ def cmd_kb(args, conn) -> int:
     return 0
 
 
-def cmd_digest(args, conn) -> int:
-    from scripts.lib.digest import build_digest
+def _write_digests(args, conn) -> list[tuple[Account, tuple[Path, Path, Path]]]:
+    from scripts.lib.digest import build_digest, build_month_digest, build_week_digest
 
+    days = getattr(args, "days", None)
+    written: list[tuple[Account, tuple[Path, Path, Path]]] = []
     for account in _accounts(args.mailbox):
-        path = build_digest(conn, account.slug, account.address, days=getattr(args, "days", None))
-        _log(f"  wrote {rel_path(path)}")
+        paths = (
+            build_digest(conn, account.slug, account.address, days=days),
+            build_week_digest(conn, account.slug, account.address),
+            build_month_digest(conn, account.slug, account.address),
+        )
+        for path in paths:
+            _log(f"  wrote {rel_path(path)}")
+        written.append((account, paths))
+    return written
+
+
+def _email_digests(written: list[tuple[Account, tuple[Path, Path, Path]]]) -> None:
+    from scripts.lib.mail_send import send_digest_email
+
+    errors: list[str] = []
+    for account, (daily_path, week_path, month_path) in written:
+        subject = f"mymail digest {daily_path.stem}"
+        try:
+            send_digest_email(
+                account,
+                subject=subject,
+                body_text=f"Daily, week, and month digests for {account.address}.",
+                attachments=[daily_path, week_path, month_path],
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{account.address}: {exc}")
+            continue
+        _log(f"  emailed {account.address}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
+def cmd_digest(args, conn) -> int:
+    written = _write_digests(args, conn)
+    if getattr(args, "skip_email", False):
+        return 0
+    started = _step("email digests")
+    try:
+        _email_digests(written)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"  FAILED: {exc}")
+        _log(f"  ({time.monotonic() - started:.0f}s)")
+        return 1
+    _log(f"  ({time.monotonic() - started:.0f}s)")
     return 0
 
 
 def cmd_daily(args, conn) -> int:
     failures: list[str] = []
+    written: list[tuple[Account, tuple[Path, Path, Path]]] = []
 
     def run(title: str, fn) -> None:
         started = _step(title)
@@ -217,6 +263,14 @@ def cmd_daily(args, conn) -> int:
             failures.append(title)
             _log(f"  FAILED: {exc}")
         _log(f"  ({time.monotonic() - started:.0f}s)")
+
+    def write_digests(step_args, step_conn) -> int:
+        written.extend(_write_digests(step_args, step_conn))
+        return 0
+
+    def email_digests(_step_args, _step_conn) -> int:
+        _email_digests(written)
+        return 0
 
     run("sync", cmd_sync)
     run("reclassify", cmd_reclassify)
@@ -232,7 +286,9 @@ def cmd_daily(args, conn) -> int:
             run("clean", cmd_clean)
     run("reconcile", cmd_reconcile)
     run("kb", cmd_kb)
-    run("digest", cmd_digest)
+    run("digest", write_digests)
+    if not getattr(args, "skip_email", False) and "digest" not in failures:
+        run("email digests", email_digests)
     if failures:
         _log(f"\nFinished with failures: {', '.join(failures)} (rerun is safe)")
         return 1
@@ -273,6 +329,13 @@ def main() -> int:
         p.add_argument("--download-limit", type=int, default=0, help="Download at most N bodies")
         p.add_argument("--max-mb", type=float, default=0, help="Skip messages larger than this (MB)")
 
+    def add_skip_email(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--skip-email",
+            action="store_true",
+            help="Write digests but do not send them (local debugging)",
+        )
+
     add("migrate", cmd_migrate, "Import legacy index + downloaded files")
     sync_flags(add("sync", cmd_sync, "Catalog new mail (incremental)"))
     p = add("download", cmd_download, "Download bodies for signal topics")
@@ -288,7 +351,14 @@ def main() -> int:
     for flag in ("--skip-unsubscribe", "--skip-delete", "--skip-wipe"):
         p.add_argument(flag, action="store_true")
     add("kb", cmd_kb, "Regenerate knowledge-base markdown")
-    add("digest", cmd_digest, "Write today's digest").add_argument("--days", type=int, default=None)
+    p = add("digest", cmd_digest, "Write daily, week, and month digests and email them")
+    p.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Daily digest window only (week and month ignore this)",
+    )
+    add_skip_email(p)
 
     p = add("daily", cmd_daily, "Run everything (incremental)")
     sync_flags(p)
@@ -296,9 +366,15 @@ def main() -> int:
     p.add_argument("--safe", action="store_true", help="Read-only on Gmail: no inbox changes, no clean")
     p.add_argument("--skip-download", action="store_true")
     p.add_argument("--skip-clean", action="store_true")
+    add_skip_email(p)
     for flag in ("--skip-unsubscribe", "--skip-delete", "--skip-wipe"):
         p.add_argument(flag, action="store_true")
-    p.add_argument("--days", type=int, default=None, help="Digest window (default: since last digest)")
+    p.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Daily digest window only (default: since last digest; week and month ignore this)",
+    )
 
     p = sub.add_parser("ask", help="Read-only SQL / presets (forwards to ask.py)")
     p.add_argument("rest", nargs=argparse.REMAINDER)
