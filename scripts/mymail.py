@@ -284,6 +284,10 @@ def cmd_daily(args, conn) -> int:
         run("inbox", cmd_inbox)
         if not args.skip_clean:
             run("clean", cmd_clean)
+        if "inbox" in failures:
+            run("inbox retry", cmd_inbox)
+            if "inbox retry" not in failures:
+                failures.remove("inbox")
     run("reconcile", cmd_reconcile)
     run("kb", cmd_kb)
     run("digest", write_digests)

@@ -4,7 +4,7 @@ For every message currently in the Inbox that the catalog knows:
   action  -> label mymail/action (stays in Inbox)
   fyi     -> label mymail/fyi    (stays in Inbox)
   archive -> removed from Inbox (still in All Mail and in the DB)
-  junk    -> left for `clean` (unsubscribe + Trash)
+  junk    -> removed from Inbox now; clean unsubscribes + trashes it from All Mail
 Unknown messages (arrived after the last sync) are not touched.
 """
 
@@ -37,7 +37,9 @@ def tidy_inbox(
         )
     }
     counts = {"inbox": 0, "unknown": 0, "action": 0, "fyi": 0, "archive": 0, "junk": 0}
-    plan: dict[str, list[int]] = {"action": [], "fyi": [], "archive": []}
+    plan: dict[str, list[int]] = {"action": [], "fyi": [], "archive": [], "junk": []}
+    archived = 0
+    failed = 0
 
     with GmailSession(account.address, account.password, readonly=not apply) as gmail:
         uids = gmail.search_raw("in:inbox")
@@ -60,17 +62,36 @@ def tidy_inbox(
             log("  dry run: nothing changed (use --apply)")
             return counts
 
+        for batch in chunks(plan["archive"] + plan["junk"], 200):
+            try:
+                archived += gmail.archive(batch)
+            except Exception as exc:  # noqa: BLE001 — one batch must not abandon the rest
+                failed += len(batch)
+                log(f"  archive batch failed ({len(batch)} msgs): {exc}")
         for priority, label in LABELS.items():
             if plan[priority]:
                 gmail.create_folder(label)
             for batch in chunks(plan[priority], 200):
-                gmail.add_labels(batch, [label])
-        archived = 0
-        for batch in chunks(plan["archive"], 200):
-            archived += gmail.archive(batch)
+                try:
+                    gmail.add_labels(batch, [label])
+                except Exception as exc:  # noqa: BLE001 — one batch must not abandon the rest
+                    failed += len(batch)
+                    log(f"  label batch failed ({len(batch)} msgs): {exc}")
         log(f"  labeled action={len(plan['action'])} fyi={len(plan['fyi'])}, archived {archived}")
 
     log_path = mailbox_dir(slug) / "inbox_log.jsonl"
     with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"at": datetime.now(timezone.utc).isoformat(), **counts}) + "\n")
+        handle.write(
+            json.dumps(
+                {
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    **counts,
+                    "archived": archived,
+                    "failed": failed,
+                }
+            )
+            + "\n"
+        )
+    if failed > 0:
+        raise RuntimeError(f"inbox tidy: {failed} message(s) not updated")
     return counts
