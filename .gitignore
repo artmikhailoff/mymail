@@ -28,3 +28,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Ship pipeline scratch (evidence, reviews). Do not commit.
+.cursor/pipeline/
