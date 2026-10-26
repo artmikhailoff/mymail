@@ -18,6 +18,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from scripts.lib import triage
 from scripts.lib.digest_logs import (
     delete_removals_in_window,
     load_jsonl,
@@ -28,6 +29,23 @@ from scripts.lib.paths import DIGESTS_DIR, delete_log_path, wipe_log_path
 
 MAX_LOOKBACK_DAYS = 7
 FYI_PER_TOPIC = 15
+
+
+def _group_by_base_priority(
+    rows: list[sqlite3.Row], address: str
+) -> dict[str, list[sqlite3.Row]]:
+    """Group by priority before the inbox age demotion.
+
+    Triage stores ``archive`` after ``max_age_days``. Digests call
+    ``priority_for`` with no age cutoffs so action/fyi sections stay put.
+    """
+    rules = triage.load_rules()
+    owner = address.lower()
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        priority, _reason = triage.priority_for(row, rules, owner)
+        grouped.setdefault(priority or "archive", []).append(row)
+    return grouped
 
 
 def _meta_key(slug: str) -> str:
@@ -88,9 +106,7 @@ def build_digest(conn: sqlite3.Connection, slug: str, address: str, *, days: int
         "SELECT * FROM messages WHERE mailbox = ? AND date >= ? ORDER BY date DESC",
         (slug, since_s),
     ).fetchall()
-    by_priority: dict[str, list[sqlite3.Row]] = {}
-    for row in rows:
-        by_priority.setdefault(row["priority"] or "archive", []).append(row)
+    by_priority = _group_by_base_priority(rows, address)
 
     def line(row: sqlite3.Row) -> str:
         who = row["from_name"] or row["from_email"] or "?"
@@ -202,9 +218,7 @@ def _write_range_digest(
         "SELECT * FROM messages WHERE mailbox = ? AND date >= ? ORDER BY date DESC",
         (slug, since_s),
     ).fetchall()
-    by_priority: dict[str, list[sqlite3.Row]] = {}
-    for row in rows:
-        by_priority.setdefault(row["priority"] or "archive", []).append(row)
+    by_priority = _group_by_base_priority(rows, address)
 
     def line(row: sqlite3.Row) -> str:
         who = row["from_name"] or row["from_email"] or "?"
