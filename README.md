@@ -26,7 +26,7 @@ Runs, incrementally and safe to rerun:
     then email those three digests to that mailbox
 
 (`reclassify` also runs right after sync so classifier fixes apply retroactively.)
-Action items older than 30 days become fyi, fyi older than 60 days leaves the
+Action items older than 2 days become fyi, fyi older than 2 days leaves the
 Inbox — both tunable in `config/rules.toml`.
 
 Variants:

@@ -30,7 +30,7 @@ senders = [
 
 [action]
 # Older "action" candidates are demoted to "fyi" (you can't act on a 2015 invoice).
-max_age_days = 30
+max_age_days = 2
 # Promotional wording never makes a message "action" ("your discount expires").
 exclude_patterns = [
     '\b(discount|coupon|promo|deal|sale|savings|reward|points|offer)s?\b',
@@ -62,7 +62,7 @@ subject_patterns = [
 
 [fyi]
 # FYI mail older than this leaves the Inbox (priority becomes "archive").
-max_age_days = 60
+max_age_days = 2
 
 [archive]
 # Signal mail that is captured in the DB but does not deserve Inbox space.

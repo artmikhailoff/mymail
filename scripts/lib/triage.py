@@ -26,9 +26,9 @@ class Rules:
     action_subjects: list[re.Pattern] = field(default_factory=list)
     archive_topics: set[str] = field(default_factory=set)
     archive_subjects: list[re.Pattern] = field(default_factory=list)
-    action_max_age_days: int = 30
+    action_max_age_days: int = 2
     action_excludes: list[re.Pattern] = field(default_factory=list)
-    fyi_max_age_days: int = 60
+    fyi_max_age_days: int = 2
 
 
 def load_rules(path=RULES_PATH) -> Rules:
@@ -49,9 +49,9 @@ def load_rules(path=RULES_PATH) -> Rules:
         action_subjects=patterns("action"),
         archive_topics=set(data.get("archive", {}).get("topics", [])),
         archive_subjects=patterns("archive"),
-        action_max_age_days=int(data.get("action", {}).get("max_age_days", 30)),
+        action_max_age_days=int(data.get("action", {}).get("max_age_days", 2)),
         action_excludes=[re.compile(p, re.I) for p in data.get("action", {}).get("exclude_patterns", [])],
-        fyi_max_age_days=int(data.get("fyi", {}).get("max_age_days", 60)),
+        fyi_max_age_days=int(data.get("fyi", {}).get("max_age_days", 2)),
     )
 
 
