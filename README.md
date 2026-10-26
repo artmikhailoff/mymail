@@ -39,6 +39,8 @@ python scripts/mymail.py daily --max-mb 5      # skip downloading huge messages
 python scripts/mymail.py sync --full --since-year 2008   # rescan whole years
 ```
 
+Omitting `--since-year` on full sync also scans from 2008.
+
 Each step is also a subcommand (`sync`, `download`, `text`, `extract`, `triage`,
 `inbox [--apply]`, `clean`, `kb`, `digest`, `migrate`). `run_all.py` is an alias
 for `daily`. `--skip-email` on `daily` or `digest` writes the files and skips

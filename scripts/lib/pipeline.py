@@ -19,6 +19,7 @@ from scripts.lib import db
 from scripts.lib.accounts import Account
 from scripts.lib.classify import classify_record
 from scripts.lib.gmail import (
+    DEFAULT_SINCE_YEAR,
     META_FIELDS,
     SCOPE,
     GmailSession,
@@ -213,7 +214,7 @@ def sync_mailbox(
         if full:
             mode = "full"
             uids: set[int] = set()
-            for year in years_to_scan(since_year or this_year - 4, until_year or this_year):
+            for year in years_to_scan(since_year or DEFAULT_SINCE_YEAR, until_year or this_year):
                 found, _ = search_year(gmail, year)
                 log(f"  {year}: {len(found)} in Gmail")
                 uids.update(found)
@@ -233,7 +234,7 @@ def sync_mailbox(
             else:
                 mode = "full"
                 uids = set()
-                for year in years_to_scan(since_year or this_year - 4, until_year or this_year):
+                for year in years_to_scan(since_year or DEFAULT_SINCE_YEAR, until_year or this_year):
                     found, _ = search_year(gmail, year)
                     log(f"  {year}: {len(found)} in Gmail")
                     uids.update(found)

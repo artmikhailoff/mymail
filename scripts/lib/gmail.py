@@ -36,6 +36,9 @@ BODY_FIELDS = ["BODY.PEEK[]", "X-GM-MSGID"]
 # A single Gmail IMAP search can omit matches once the hit list gets very large.
 LARGE_YEAR_HITS = 5000
 
+# Full sync and census scans start here when --since-year is omitted.
+DEFAULT_SINCE_YEAR = 2008
+
 
 def years_to_scan(since_year: int, until_year: int) -> list[int]:
     if since_year > until_year:

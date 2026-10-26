@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from scripts.lib.accounts import resolve_accounts  # noqa: E402
 from scripts.lib.classify import classify_record  # noqa: E402
 from scripts.lib.gmail import (  # noqa: E402
+    DEFAULT_SINCE_YEAR,
     META_FIELDS,
     GmailSession,
     chunks,
@@ -159,8 +160,8 @@ def main() -> int:
     parser.add_argument(
         "--since-year",
         type=int,
-        default=datetime.now().year - 4,
-        help="First calendar year to search, inclusive (default: five calendar years)",
+        default=DEFAULT_SINCE_YEAR,
+        help="First calendar year to search, inclusive (default: 2008)",
     )
     parser.add_argument(
         "--until-year",
